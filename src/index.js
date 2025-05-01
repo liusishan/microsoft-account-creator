@@ -94,15 +94,35 @@ async function createAccount(page) {
   await page.type(SELECTORS.BIRTH_YEAR_INPUT, PersonalInfo.birthYear);
   await page.keyboard.press("Enter");
   const email = await page.$eval(SELECTORS.EMAIL_DISPLAY, el => el.textContent);
+  await page.waitForSelector(SELECTORS.FUNCAPTCHA, { timeout: 60000 });
   log("Please solve the captcha", "yellow");
+  await page.waitForFunction(
+    (selector) => !document.querySelector(selector),
+    {},
+    SELECTORS.FUNCAPTCHA
+  );
+  log("Captcha Solved!", "green");
 
   // Waiting for confirmed account.
-  await page.waitForSelector(SELECTORS.DECLINE_BUTTON);
-  log("Captcha Solved!", "green");
-  await page.click(SELECTORS.DECLINE_BUTTON);
+  try {
+    await page.waitForSelector(SELECTORS.DECLINE_BUTTON, { timeout: 10000 });
+    await page.click(SELECTORS.DECLINE_BUTTON);
+  } catch (error) {
+    log("DECLINE_BUTTON not found within 10 seconds, checking for POST_REDIRECT_FORM...", "yellow");
+    const postRedirectFormExists = await page.$(SELECTORS.POST_REDIRECT_FORM);
+    if (postRedirectFormExists) {
+      log("POST_REDIRECT_FORM found, checking for CLOSE_BUTTON...", "green");
+      await page.waitForSelector(SELECTORS.CLOSE_BUTTON);
+      log("CLOSE_BUTTON found, clicking...", "green");
+      await page.click(SELECTORS.CLOSE_BUTTON);
+    } else {
+      log("Neither DECLINE_BUTTON nor POST_REDIRECT_FORM found.", "red");
+    }
+  }
   await page.waitForSelector(SELECTORS.OUTLOOK_PAGE);
 
   if (config.ADD_RECOVERY_EMAIL) {
+    log("Adding Recovery Email...", "yellow");
     await page.goto("https://account.live.com/proofs/Manage");
 
     // First verify.
@@ -116,25 +136,54 @@ async function createAccount(page) {
     log(`Email Code Received! Code: ${firstCode}`, "green");
     await page.type(SELECTORS.EMAIL_CODE_INPUT, firstCode);
     await page.keyboard.press("Enter");
-    await page.waitForSelector(SELECTORS.AFTER_CODE);
+    await delay(5000);
+    if (await page.$(SELECTORS.VERIFICATION_ERROR)) {
+      log("Verification Error, resending code...", "red");
+      await resendCode(page, recoveryEmail);
+    }
 
-    // Second verify.
-    await page.click(SELECTORS.AFTER_CODE);
-    await page.waitForSelector(SELECTORS.DOUBLE_VERIFY_EMAIL);
-    await page.type(SELECTORS.DOUBLE_VERIFY_EMAIL, recoveryEmail.email);
-    await page.keyboard.press("Enter");
-    await page.waitForSelector(SELECTORS.DOUBLE_VERIFY_CODE);
-    log("Waiting for Email Code... (second verify)", "yellow");
-    secondCode = await recMail.getMessage(recoveryEmail);
-    log(`Email Code Received! Code: ${secondCode}`, "green");
-    await page.type(SELECTORS.DOUBLE_VERIFY_CODE, secondCode);
-    await page.keyboard.press("Enter");
-    await page.waitForSelector(SELECTORS.INTERRUPT_CONTAINER);
-
+    try {
+      await page.waitForSelector(SELECTORS.INTERRUPT_CONTAINER, { timeout: 10000 });
+    } catch (error) {
+      log("INTERRUPT_CONTAINER not found within 10 seconds, checking for AFTER_CODE...", "yellow");
+      const afterCodeExists = await page.$(SELECTORS.AFTER_CODE);
+      if (afterCodeExists) {
+        log("Second Verify Needed", "yellow");
+        // Second verify.
+        await page.click(SELECTORS.AFTER_CODE);
+        await page.waitForSelector(SELECTORS.DOUBLE_VERIFY_EMAIL);
+        await page.type(SELECTORS.DOUBLE_VERIFY_EMAIL, recoveryEmail.email);
+        await page.keyboard.press("Enter");
+        await page.waitForSelector(SELECTORS.DOUBLE_VERIFY_CODE);
+        log("Waiting for Email Code... (second verify)", "yellow");
+        secondCode = await recMail.getMessage(recoveryEmail);
+        log(`Email Code Received! Code: ${secondCode}`, "green");
+        await page.type(SELECTORS.DOUBLE_VERIFY_CODE, secondCode);
+        await page.keyboard.press("Enter");
+        await delay(5000);
+        if (await page.$(SELECTORS.VERIFICATION_ERROR)) {
+          log("Verification Error, resending code...", "red");
+          await resendCode(page, recoveryEmail);
+        }
+        await page.waitForSelector(SELECTORS.INTERRUPT_CONTAINER);
+      } else {
+        log("Neither INTERRUPT_CONTAINER nor AFTER_CODE found.", "red");
+      }
+    }
   }
 
   await writeCredentials(email, password);
 
+}
+
+async function resendCode(page, recoveryEmail) {
+  await page.click(SELECTORS.RESEND_CODE);
+  await page.waitForSelector(SELECTORS.EMAIL_CODE_INPUT);
+  log("Waiting for Email Code...", "yellow");
+  code = await recMail.getMessage(recoveryEmail);
+  log(`Email Code Received! Code: ${firstCode}`, "green");
+  await page.type(SELECTORS.EMAIL_CODE_INPUT, firstCode);
+  await page.keyboard.press("Enter");
 }
 
 async function writeCredentials(email, password) {
@@ -182,7 +231,12 @@ const SELECTORS = {
   AFTER_CODE: '#idDiv_SAOTCS_Proofs_Section',
   DOUBLE_VERIFY_EMAIL: '#idTxtBx_SAOTCS_ProofConfirmation',
   DOUBLE_VERIFY_CODE: '#idTxtBx_SAOTCC_OTC',
-  INTERRUPT_CONTAINER: '#interruptContainer'
+  INTERRUPT_CONTAINER: '#interruptContainer',
+  VERIFICATION_ERROR: '#iVerificationErr',
+  RESEND_CODE: '#iShowSendCode',
+  POST_REDIRECT_FORM: 'form[data-testid="post-redirect-form"]',
+  CLOSE_BUTTON: '#close-button',
+  FUNCAPTCHA: '#enforcementFrame',
 };
 
 function delay(time) {
