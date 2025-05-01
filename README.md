@@ -19,7 +19,7 @@ This project automates the creation of Microsoft accounts using [puppeteer-with-
 - Automatic generation of Microsoft accounts
 - Use of real Italian names and surnames
 - Creation of strong passwords using Italian words
-- Option to add a recovery email
+- Option to add a recovery email (An automatically generated gmail on SMAIL PRO)
 - Support for proxy usage
 
 ## 🛠 How It Works
@@ -31,7 +31,7 @@ This project automates the creation of Microsoft accounts using [puppeteer-with-
 3. Generate a random password using Italian words
 4. Input a random birthday
 5. Solve CAPTCHA (manual)
-6. Optionally add a recovery email
+6. Optionally add a recovery email (An automatically generated gmail on SMAIL PRO)
 7. Complete account creation
 
 ### Built With
